@@ -1,21 +1,17 @@
+// src/services/gateway.js (TAM VE EKSİKSİZ KOD)
+
 const express = require('express');
 const http = require('http');
-const { WebSocketServer } = require('ws');
-const WebSocket = require('ws');
+const { WebSocketServer, WebSocket } = require('ws');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid'); // Benzersiz ID üretmek için
-
-const GATEWAY_PORT = process.env.GATEWAY_PORT || 3000;
-const WORKER_PORT = process.env.WORKER_PORT || 8081;
-const workerUrl = `ws://localhost:${WORKER_PORT}`;
+const { v4: uuidv4 } = require('uuid');
+const config = require('../config'); // Yeni merkezi konfigürasyon dosyasını çağırıyoruz
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
+const workerUrl = `ws://localhost:${config.workerPort}`;
 let workerSocket;
-
-// Tarayıcı bağlantılarını saklamak için bir harita (Map)
 const browserClients = new Map();
 
 function connectToWorker() {
@@ -24,27 +20,19 @@ function connectToWorker() {
 
     workerSocket.on('open', () => console.log(`[Gateway] ✅ Worker'a başarıyla bağlandı.`));
     
-    // Worker'dan gelen hedefli mesajları işle
     workerSocket.on('message', (message) => {
         try {
             const data = JSON.parse(message);
-            // Gelen paketin yapısını kontrol et
             if (!data.targetClientId || !data.payload) {
                 console.warn("[Gateway] Worker'dan hedefsiz veya bozuk formatta mesaj alındı.");
                 return;
             }
 
             const { targetClientId, payload } = data;
-            
-            // Hedef tarayıcıyı bul
             const targetClient = browserClients.get(targetClientId);
 
             if (targetClient && targetClient.readyState === WebSocket.OPEN) {
-                // Sadece ve sadece doğru hedefe gönder
                 targetClient.send(JSON.stringify(payload));
-            } else {
-                // Bu bir hata değil, kullanıcı sayfayı kapatmış olabilir.
-                // console.warn(`[Gateway] Hedef istemci ${targetClientId} bulunamadı veya bağlantısı kapalı.`);
             }
         } catch (error) {
             console.error("[Gateway] Worker'dan gelen mesaj işlenirken hata:", error);
@@ -56,31 +44,38 @@ function connectToWorker() {
         setTimeout(connectToWorker, 5000);
     });
 
-    workerSocket.on('error', (err) => {});
+    workerSocket.on('error', (err) => {
+        // Hata loglaması yerine 'close' olayının yeniden bağlanmayı tetiklemesine izin veriyoruz.
+    });
 }
 
 connectToWorker();
 
-app.use(express.static(path.join(__dirname, 'public')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+// DİKKAT: public klasörünün yeni yolu doğru bir şekilde belirtildi.
+// __dirname -> src/services
+// ../ -> src
+// ../../ -> projenin kök dizini
+const publicPath = path.resolve(__dirname, '../../public');
+console.log(`[Gateway] Public klasörü şu yoldan sunuluyor: ${publicPath}`);
+app.use(express.static(publicPath));
+app.get('*', (req, res) => {
+    res.sendFile(path.resolve(publicPath, 'index.html'));
+});
 
 wss.on('connection', ws => {
-  // Her yeni tarayıcı bağlantısına benzersiz bir kimlik ver
   const clientId = uuidv4();
-  ws.clientId = clientId; // Kimliği bağlantı nesnesine ekle
-  browserClients.set(clientId, ws); // Kimliği ve bağlantıyı haritada sakla
+  ws.clientId = clientId;
+  browserClients.set(clientId, ws);
 
   console.log(`[Gateway] ✅ Tarayıcı bağlandı. ID: ${clientId}`);
   
-  // Tarayıcıdan gelen mesajı işle
   ws.on('message', (message) => {
     if (workerSocket && workerSocket.readyState === WebSocket.OPEN) {
-        // Mesajı worker'a gönderirken, kimin gönderdiğini de ekle
         try {
             const data = JSON.parse(message);
             workerSocket.send(JSON.stringify({
-                sourceClientId: ws.clientId, // Bu mesajın kaynağı kim?
-                payload: data // Orijinal mesaj neydi?
+                sourceClientId: ws.clientId,
+                payload: data
             }));
         } catch (error) {
             console.error("[Gateway] Tarayıcıdan gelen mesaj parse edilemedi:", error);
@@ -91,12 +86,11 @@ wss.on('connection', ws => {
   });
 
   ws.on('close', () => {
-    // Tarayıcı kapandığında onu listeden sil
     browserClients.delete(ws.clientId);
     console.log(`[Gateway] Tarayıcı bağlantısı kapandı. ID: ${ws.clientId}`);
   });
 });
 
-server.listen(GATEWAY_PORT, () => {
-  console.log(`[Gateway] ✅ Gateway sunucusu http://localhost:${GATEWAY_PORT} adresinde çalışıyor.`);
+server.listen(config.gatewayPort, () => {
+  console.log(`[Gateway] ✅ Gateway sunucusu http://localhost:${config.gatewayPort} adresinde çalışıyor.`);
 });

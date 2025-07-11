@@ -1,21 +1,21 @@
 window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if (window.SpeechRecognition) {
+    // --- ELEMENTLERİ BAŞTA TANIYALIM ---
     const recognition = new SpeechRecognition();
     const toggleButton = document.getElementById('toggleButton');
     const resetButton = document.getElementById('resetButton');
     const chatBox = document.getElementById('chatBox');
     const durumMesaji = document.getElementById('durum');
+
+    // --- DEĞİŞKENLER ---
     let isListening = false;
     let sessionId = `session_${Date.now()}`;
     let audioQueue = [];
     let isPlaying = false;
     let userSaidSomething = false;
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
-    
+    // --- YARDIMCI FONKSİYONLAR ---
     const addMessage = (content, type) => {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
@@ -28,10 +28,18 @@ if (window.SpeechRecognition) {
         durumMesaji.className = `durum-${status}`;
         durumMesaji.textContent = text;
     };
+    
+    // --- WEBSOCKET BAĞLANTISI ---
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
 
-    ws.onopen = () => console.log('Gateway sunucusuna WebSocket ile bağlandı.');
+    ws.onopen = () => {
+        console.log('Gateway sunucusuna WebSocket ile bağlandı.');
+        updateStatus('hazir', 'Hazır');
+    };
     ws.onclose = () => updateStatus('hata', 'Bağlantı kesildi.');
-    ws.onerror = (err) => updateStatus('hata', 'Bağlantı hatası.');
+    ws.onerror = () => updateStatus('hata', 'Bağlantı hatası.');
     
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -99,6 +107,7 @@ if (window.SpeechRecognition) {
         }
     };
     
+    // --- SPEECH RECOGNITION AYARLARI ---
     recognition.lang = 'tr-TR';
     recognition.continuous = false;
     recognition.interimResults = false;
@@ -117,6 +126,7 @@ if (window.SpeechRecognition) {
         }
     };
 
+    // --- BUTON EVENTLERİ ---
     const toggleListening = () => {
         isListening = !isListening;
         if (isListening) {
@@ -147,6 +157,7 @@ if (window.SpeechRecognition) {
     });
     
     toggleButton.addEventListener('click', toggleListening);
+
 } else {
     document.body.innerHTML = '<h1>Üzgünüz, tarayıcınız Konuşma Tanıma API\'ını desteklemiyor.</h1>';
 }

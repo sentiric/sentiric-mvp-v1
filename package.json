@@ -3,10 +3,11 @@
   "version": "1.0.0",
   "description": "Sentiric'in Pexels görselli, güvenli veritabanlı ve akıllı form mantıklı profesyonel prototipi.",
   "main": "index.js",
-  "scripts": {
+
+"scripts": {
     "start": "concurrently \"npm:start:gateway\" \"npm:start:worker\"",
-    "start:gateway": "dotenv -e .env -- node gateway/gateway-server.js",
-    "start:worker": "dotenv -e .env -- node worker/worker-server.js",
+    "start:gateway": "node src/services/gateway.js",
+    "start:worker": "node src/services/worker.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
@@ -18,7 +19,6 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "dotenv-cli": "^7.4.2"
+    "concurrently": "^8.2.2"
   }
 }
