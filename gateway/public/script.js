@@ -20,10 +20,18 @@ if (window.SpeechRecognition) {
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'ai_audio') {
-            audioQueue.push({ text: data.payload.text, audio: data.payload.audio });
+            audioQueue.push({ 
+                text: data.payload.text, 
+                audio: data.payload.audio,
+                audio_format: data.payload.audio_format 
+            });
             if (!isPlaying) {
                 playNextInQueue();
             }
+        }
+         if (data.type === 'error') {
+            addMessage(data.payload.message, 'error');
+            updateStatus('hazir', 'Hazır');
         }
     };
 
@@ -40,10 +48,12 @@ if (window.SpeechRecognition) {
         }
 
         isPlaying = true;
-        const { text, audio } = audioQueue.shift();
+        const { text, audio, audio_format } = audioQueue.shift(); 
         addMessage(marked.parse(text), 'ai', true);
         
-        const audioBlob = new Audio(`data:audio/mp3;base64,${audio}`);
+        const format = audio_format || 'mp3';
+        const audioBlob = new Audio(`data:audio/${format};base64,${audio}`);
+        
         audioBlob.play();
         audioBlob.onended = playNextInQueue;
     };

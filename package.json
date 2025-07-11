@@ -1,24 +1,19 @@
 {
-  "name": "sentiric-mvp-v1-multiservice",
+  "name": "sentiric-mvp-v1-local-ai",
   "version": "1.0.0",
-  "description": "Sentiric platformunun Gateway ve Worker servislerini içeren ilk mimari prototipi.",
+  "description": "Sentiric platformunun tamamen yerel LLM (Ollama) ve TTS (Piper) ile çalışan prototipi.",
   "main": "index.js",
   "scripts": {
     "start": "concurrently \"npm:start:gateway\" \"npm:start:worker\"",
-    "start:gateway": "dotenv -e .env -- node gateway/gateway-server.js",
-    "start:worker": "dotenv -e .env -- node worker/worker-server.js",
+    "start:gateway": "node gateway/gateway-server.js",
+    "start:worker": "node worker/worker-server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "@google-cloud/text-to-speech": "^5.3.0",
-    "@google/generative-ai": "^0.15.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "dotenv-cli": "^7.4.2"
+    "concurrently": "^8.2.2"
   }
 }

@@ -1,13 +1,30 @@
-# Sentiric MVP v1 - Multiservice Mimarisi
+# Sentiric MVP v1 - Yerel AI Motoru
 
-Bu proje, Sentiric platformunun "sağlam" bir temel üzerine oturtulmuş ilk prototipidir. Önceki tek sunuculu yapının aksine, bu sürüm, o kapsamlı plandaki **mikroservis mimarisini** taklit eder ve iki ana bileşenden oluşur:
+Bu proje, Sentiric platformunun, harici bulut servislerine bağımlı olmadan, **tamamen yerel kaynaklarla** çalışan bir prototipidir. Bu sürüm, maliyet endişelerini ortadan kaldırır ve tam veri gizliliği sağlar.
 
-1.  **Gateway (`/gateway`):** Dış dünya ile konuşan "kulaklar ve ağız". Web arayüzünü sunar, tarayıcıdan gelen ses verisini (gelecekte Twilio'dan) alır ve WebSocket üzerinden Worker'a iletir. Worker'dan gelen sesli cevabı da alıp tarayıcıya (veya telefona) geri gönderir.
-2.  **Worker (`/worker`):** Sistemin "beyni". Gateway'den gelen metinleri alır, Akıllı Yönlendirici ve RAG mimarisini kullanarak düşünür, bir cevap üretir ve bu cevabı sese çevirerek (TTS) Gateway'e geri yollar.
+## 🚀 Mimarisi
 
-Bu yapı, gerçek bir telefoni sisteminin çalışma mantığını simüle eder ve platformun ölçeklenebilir, dayanıklı ve esnek olmasını sağlar.
+Proje, iki ana servis üzerine kurulmuştur ve tüm yapay zeka işlemleri yerel olarak çalışır:
+
+1.  **Gateway (`/gateway`):** Dış dünya ile konuşan "kulaklar ve ağız". Web arayüzünü sunar ve tarayıcıdan gelen metin taleplerini WebSocket üzerinden Worker'a iletir.
+2.  **Worker (`/worker`):** Sistemin "beyni".
+    -   **LLM (Dil Modeli):** [Ollama](https://ollama.com/) aracılığıyla yerel olarak çalışan `phi3` gibi modelleri kullanarak düşünür ve cevap üretir.
+    -   **TTS (Metin Okuma):** [Piper TTS](https://github.com/rhasspy/piper) motorunu kullanarak üretilen metinleri yüksek kaliteli, doğal bir sese dönüştürür.
 
 ## 🛠️ Kurulum ve Çalıştırma
+
+### Ön Gereksinimler
+
+1.  **Ollama:** [ollama.com](https://ollama.com/) adresinden indirin ve kurun.
+2.  **Ollama Modeli:** Terminalde şu komutu çalıştırın: `ollama pull phi3`
+3.  **Piper TTS:**
+    - `C:\piper` adında bir klasör oluşturun.
+    - [Piper GitHub Sürümleri](https://github.com/rhasspy/piper/releases) sayfasından Windows sürümünü indirin ve dosyalarını `C:\piper` içine çıkartın.
+4.  **Piper Ses Modelleri:**
+    - `C:\piper-voices` adında bir klasör oluşturun.
+    - Terminalde `C:\` dizinindeyken şu komutu çalıştırın: `git clone https://huggingface.co/rhasspy/piper-voices`
+
+### Projeyi Kurma
 
 1.  **Repo'yu Klonlayın:**
     ```bash
@@ -20,16 +37,11 @@ Bu yapı, gerçek bir telefoni sisteminin çalışma mantığını simüle eder 
     npm install
     ```
 
-3.  **Ortam Değişkenlerini Ayarlayın:**
-    - `.env.example` dosyasını kopyalayıp `.env` adında yeni bir dosya oluşturun.
-    - `.env` dosyasını açıp kendi API anahtarlarınızı ve ayarlarınızı girin.
-    - Google Cloud Text-to-Speech API'si için bir servis hesabı anahtarı (`.json`) oluşturup projenin kök dizinine yerleştirin ve adının `.env` dosyasındakiyle eşleştiğinden emin olun.
-
-4.  **Sunucuları Başlatın:**
+3.  **Sunucuları Başlatın:**
     Bu komut, hem Gateway hem de Worker sunucusunu aynı anda başlatır.
     ```bash
     npm start
     ```
 
-5.  **Uygulamayı Açın:**
-    - Tarayıcınızdan `http://localhost:3000` (veya `.env`'de belirttiğiniz `GATEWAY_PORT`) adresine gidin.
+4.  **Uygulamayı Açın:**
+    - Tarayıcınızdan `http://localhost:3000` adresine gidin.
