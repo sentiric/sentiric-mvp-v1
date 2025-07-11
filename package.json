@@ -1,0 +1,16 @@
+{
+  "name": "sentiric-mvp-v1",
+  "version": "1.0.0",
+  "description": "Sentiric platformunun Akıllı Yönlendirici ve RAG mimarisini içeren ilk MVP'si.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.15.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}
