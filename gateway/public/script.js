@@ -1,5 +1,3 @@
-// gateway/public/script.js (TAM VE EKSİKSİZ KOD)
-
 window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if (window.SpeechRecognition) {
@@ -14,35 +12,40 @@ if (window.SpeechRecognition) {
     let isPlaying = false;
     let userSaidSomething = false;
 
-    // --- AKILLI BAĞLANTI KODU ---
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}`;
-    console.log(`WebSocket bağlantısı kuruluyor: ${wsUrl}`);
     const ws = new WebSocket(wsUrl);
-    // --- AKILLI BAĞLANTI KODU SONU ---
+    
+    const addMessage = (content, type) => {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message ${type}`;
+        messageDiv.innerHTML = content;
+        chatBox.appendChild(messageDiv);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    };
 
+    const updateStatus = (status, text) => {
+        durumMesaji.className = `durum-${status}`;
+        durumMesaji.textContent = text;
+    };
 
     ws.onopen = () => console.log('Gateway sunucusuna WebSocket ile bağlandı.');
     ws.onclose = () => updateStatus('hata', 'Bağlantı kesildi.');
-    ws.onerror = (err) => {
-        console.error("WebSocket Hatası:", err);
-        updateStatus('hata', 'Bağlantı hatası.');
-    }
+    ws.onerror = (err) => updateStatus('hata', 'Bağlantı hatası.');
     
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
-        if (data.type === 'ai_audio') {
+        if (data.type === 'ai_response') {
+            processVisualResponse(data.payload.display);
             audioQueue.push({ 
-                text: data.payload.text, 
                 audio: data.payload.audio,
                 audio_format: data.payload.audio_format 
             });
             if (!isPlaying) {
                 playNextInQueue();
             }
-        }
-         if (data.type === 'error') {
-            addMessage(data.payload.message, 'error');
+        } else if (data.type === 'error') {
+            addMessage(`<p>${data.payload.message}</p>`, 'error-card');
             updateStatus('hazir', 'Hazır');
         }
     };
@@ -58,72 +61,56 @@ if (window.SpeechRecognition) {
             }
             return;
         }
-
         isPlaying = true;
         updateStatus('konusuyor', 'Yapay zeka konuşuyor...');
-
-        const { text, audio, audio_format } = audioQueue.shift(); 
-        addMessage(marked.parse(text), 'ai', true);
-        
-        const format = audio_format || 'mp3';
+        const { audio, audio_format } = audioQueue.shift();
+        const format = audio_format || 'wav';
         const audioBlob = new Audio(`data:audio/${format};base64,${audio}`);
-        
         audioBlob.play();
         audioBlob.onended = playNextInQueue;
     };
 
-
-    recognition.lang = 'tr-TR';
-    recognition.continuous = false;
-    recognition.interimResults = false;
-
-    const addMessage = (text, sender, isHTML = false) => {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${sender}-message`;
-        const contentDiv = document.createElement('div');
-        if (isHTML) contentDiv.innerHTML = text;
-        else contentDiv.textContent = text;
-        messageDiv.appendChild(contentDiv);
-        chatBox.appendChild(messageDiv);
-        chatBox.scrollTop = chatBox.scrollHeight;
-    };
-
-    const updateStatus = (status, text) => {
-        durumMesaji.className = `durum-${status}`;
-        durumMesaji.textContent = text;
-    };
+    function processVisualResponse(display) {
+        if (!display || !display.type) return;
+        let cardHtml = '';
+        if (display.type === 'confirmation_card') {
+            const res = display.data;
+            const location = res.params.location || 'Belirtilmedi';
+            const date = res.params.checkin_date || 'Belirtilmedi';
+            const people = res.params.people_count || 'Belirtilmedi';
+            const imageUrl = res.imageUrl || `https://source.unsplash.com/random/400x200/?abstract`;
+            cardHtml = `<h3>✅ Rezervasyon Onaylandı!</h3><p><strong>Rezervasyon ID:</strong> ${res.id}</p><p><strong>Yer:</strong> ${location}</p><p><strong>Tarih:</strong> ${date}</p><p><strong>Kişi Sayısı:</strong> ${people}</p><img src="${imageUrl}" alt="${location} görseli">`;
+            addMessage(cardHtml, 'ai-card');
+        } else if (display.type === 'info_request') {
+            addMessage(`<p>${display.text}</p>`, 'ai-card');
+        }
+    }
 
     const sendTranscript = (userText) => {
         updateStatus('dusunuyor', 'Yapay zeka düşünüyor...');
-        addMessage(userText, 'user');
-        
+        addMessage(`<p>${userText}</p>`, 'user-card');
         if (ws.readyState === WebSocket.OPEN) {
             ws.send(JSON.stringify({
                 type: 'user_transcript',
                 payload: { sessionId, text: userText }
             }));
         } else {
-            addMessage('Sunucuya bağlanılamadı. Lütfen sayfayı yenileyin.', 'error');
+            addMessage('<p>Sunucuya bağlanılamadı. Lütfen sayfayı yenileyin.</p>', 'error-card');
         }
     };
     
+    recognition.lang = 'tr-TR';
+    recognition.continuous = false;
+    recognition.interimResults = false;
     recognition.onstart = () => {
-        userSaidSomething = false; 
+        userSaidSomething = false;
         updateStatus('dinliyor', 'Sizi dinliyorum...');
     }
-
     recognition.onresult = (event) => {
         userSaidSomething = true;
         const userTranscript = event.results[0][0].transcript.trim();
         sendTranscript(userTranscript);
     };
-
-    recognition.onerror = (event) => {
-        if (event.error !== 'no-speech' && event.error !== 'aborted') {
-            updateStatus('hata', `Hata: ${event.error}`);
-        }
-    };
-
     recognition.onend = () => {
         if (isListening && !userSaidSomething) {
             try { recognition.start(); } catch (e) {}
@@ -155,12 +142,11 @@ if (window.SpeechRecognition) {
             toggleButton.className = 'start';
         }
         chatBox.innerHTML = '';
-        addMessage('Oturum sıfırlandı. Yeni bir konuşma başlatabilirsiniz.', 'system', true);
+        addMessage('<p>Oturum sıfırlandı. Yeni bir konuşma başlatabilirsiniz.</p>', 'system-card');
         updateStatus('hazir', 'Hazır');
     });
     
     toggleButton.addEventListener('click', toggleListening);
-
 } else {
     document.body.innerHTML = '<h1>Üzgünüz, tarayıcınız Konuşma Tanıma API\'ını desteklemiyor.</h1>';
 }
