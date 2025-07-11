@@ -23,33 +23,38 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // --- Sunucu ve Oturum ---
 const userSessions = {};
 const wss = new WebSocketServer({ port: WORKER_PORT });
-console.log(`[Worker] ✅ Profesyonel Worker ${WORKER_PORT} portunda dinliyor...`);
+console.log(`[Worker] ✅ Güvenli Worker ${WORKER_PORT} portunda dinliyor...`);
 
 // --- ANA İŞLEM DÖNGÜSÜ ---
 wss.on('connection', ws => {
     console.log("[Worker] ✅ Gateway bağlandı.");
 
-    ws.on('message', async (message) => {
+    ws.on('message', async (rawMessage) => {
+        let sourceClientId = null; // Hata durumunda bile kimin gönderdiğini bilmek için
         try {
-            const data = JSON.parse(message);
-            if (data.type !== 'user_transcript') return;
+            const messageData = JSON.parse(rawMessage);
+            sourceClientId = messageData.sourceClientId;
+            const payload = messageData.payload;
 
-            const { sessionId, text } = data.payload;
+            if (!sourceClientId || !payload || payload.type !== 'user_transcript') {
+                return;
+            }
+            
+            const { sessionId, text } = payload.payload;
+
             if (!userSessions[sessionId]) {
                 userSessions[sessionId] = { 
-                    scenario: null,
-                    collected_params: {},
-                    last_question: null
+                    scenario: null, collected_params: {}, last_question: null
                 };
             }
             const session = userSessions[sessionId];
             
-            console.log(`[Worker] Gelen metin: "${text}" | Oturum: ${sessionId}`);
+            console.log(`[Worker] [Client: ${sourceClientId}] Gelen metin: "${text}"`);
             
+            // ... (Tüm senaryo, bilgi çıkarma ve rezervasyon mantığı öncekiyle aynı)
             if (!session.scenario) {
-                if (text.toLowerCase().includes('otel') || text.toLowerCase().includes('rezervasyon')) {
+                if (text.toLowerCase().includes('otel')) {
                     session.scenario = scenarios['otel_rezervasyonu'];
-                    console.log(`[Worker] Senaryo bulundu: ${session.scenario.id}`);
                 }
             }
             
@@ -59,17 +64,11 @@ wss.on('connection', ws => {
                 if (session.last_question) {
                     const extractionPrompt = `Kullanıcının şu cevabından: "${text}", sorulan şu soruya karşılık gelen değeri çıkar: "${session.last_question}". Sadece değeri JSON formatında ver. Örnek: {"value": "Antalya"}`;
                     const model = genAI.getGenerativeModel({ model: LLM_MODEL_NAME });
-                    
-                    try {
-                        const result = await model.generateContent(extractionPrompt);
-                        const responseText = result.response.text();
-                        const extracted = JSON.parse(responseText.match(/{.*}/s)[0]);
-                        if (extracted.value) {
-                            session.collected_params[session.last_question] = extracted.value;
-                            console.log(`[Worker] Bilgi çıkarıldı: {${session.last_question}: "${extracted.value}"}`);
-                        }
-                    } catch (e) {
-                        console.error("[Worker] ❌ Bilgi çıkarımı sırasında JSON parse hatası:", e.message);
+                    const result = await model.generateContent(extractionPrompt);
+                    const responseText = result.response.text();
+                    const extracted = JSON.parse(responseText.match(/{.*}/s)[0]);
+                    if (extracted.value) {
+                        session.collected_params[session.last_question] = extracted.value;
                     }
                 }
                 
@@ -88,16 +87,12 @@ wss.on('connection', ws => {
                 } else {
                     const db = await readDB();
                     const newReservation = { id: `res_${Date.now()}`, type: session.scenario.id, params: session.collected_params, status: 'confirmed' };
-                    
                     const imageUrl = await getImageUrl(newReservation.params.location);
                     newReservation.imageUrl = imageUrl;
-
                     db.reservations.push(newReservation);
                     await writeDB(db);
-
-                    spokenResponse = "Harika! Tüm bilgileri aldım. Rezervasyonunuzu oluşturdum.";
+                    spokenResponse = "Harika! Rezervasyonunuzu oluşturdum.";
                     displayData = { type: 'confirmation_card', data: newReservation };
-                    console.log(`[Worker] ✅ Rezervasyon tamamlandı ve kaydedildi.`);
                     delete userSessions[sessionId];
                 }
             } else {
@@ -106,28 +101,32 @@ wss.on('connection', ws => {
             }
 
             const audioContent = await getXttsAudio(spokenResponse);
-            
-            wss.clients.forEach(client => {
-                if(client.readyState === require('ws').OPEN) {
-                     client.send(JSON.stringify({
-                        type: 'ai_response',
-                        payload: { sessionId, spokenText: spokenResponse, audio: audioContent, audio_format: 'wav', display: displayData }
-                    }));
+
+            // --- CEVABI DOĞRU HEDEFE GÖNDERME ---
+            const responsePacket = {
+                targetClientId: sourceClientId,
+                payload: {
+                    type: 'ai_response',
+                    payload: { sessionId, spokenText: spokenResponse, audio: audioContent, audio_format: 'wav', display: displayData }
                 }
-            });
+            };
+            ws.send(JSON.stringify(responsePacket));
             
         } catch (error) {
-            console.error("[Worker] ❌ Ana işlem döngüsünde kritik hata:", error);
-            wss.clients.forEach(client => {
-                if(client.readyState === require('ws').OPEN) {
-                   client.send(JSON.stringify({ type: 'error', payload: { message: "İç sunucuda kritik bir hata oluştu." }}));
-                }
-           });
+            console.error(`[Worker] ❌ [Client: ${sourceClientId}] Mesaj işlenirken hata:`, error);
+            if (sourceClientId) {
+                ws.send(JSON.stringify({
+                    targetClientId: sourceClientId,
+                    payload: { type: 'error', payload: { message: "İç sunucuda kritik bir hata oluştu." }}
+                }));
+            }
         }
     });
 
     ws.on('close', () => console.log('[Worker] Gateway bağlantısı kapandı.'));
 });
+
+
 
 // --- YARDIMCI FONKSİYONLAR ---
 async function readDB() {
