@@ -1,13 +1,11 @@
-# Sentiric MVP v1
+# Sentiric MVP v1 - Multiservice Mimarisi
 
-Bu proje, Sentiric platformunun temel yeteneklerini sergileyen ilk "Minimum Viable Product" (MVP) sürümüdür. Proje, sesli komutlarla çalışan, kullanıcının niyetini anlayan ve bu niyete göre farklı uzmanlık alanlarında cevaplar üreten bir yapay zeka asistanını içerir.
+Bu proje, Sentiric platformunun "sağlam" bir temel üzerine oturtulmuş ilk prototipidir. Önceki tek sunuculu yapının aksine, bu sürüm, o kapsamlı plandaki **mikroservis mimarisini** taklit eder ve iki ana bileşenden oluşur:
 
-## 🚀 Temel Mimarisi
+1.  **Gateway (`/gateway`):** Dış dünya ile konuşan "kulaklar ve ağız". Web arayüzünü sunar, tarayıcıdan gelen ses verisini (gelecekte Twilio'dan) alır ve WebSocket üzerinden Worker'a iletir. Worker'dan gelen sesli cevabı da alıp tarayıcıya (veya telefona) geri gönderir.
+2.  **Worker (`/worker`):** Sistemin "beyni". Gateway'den gelen metinleri alır, Akıllı Yönlendirici ve RAG mimarisini kullanarak düşünür, bir cevap üretir ve bu cevabı sese çevirerek (TTS) Gateway'e geri yollar.
 
-Bu MVP, ileride kurulacak olan kapsamlı mikroservis mimarisinin iki temel prensibini tek bir Node.js uygulamasında simüle eder:
-
-1.  **Akıllı Yönlendirici (Smart Router / Orchestrator):** `server.js` içindeki mantık, kullanıcının ilk cümlesini analiz eder ("Otel arıyorum", "Masaj yaptırmak istiyorum" vb.) ve sohbetin geri kalanını doğru "uzman" senaryoya yönlendirir.
-2.  **Genişletilmiş Üretimle Geri Çağırma (RAG - Retrieval-Augmented Generation):** Her uzman senaryo (`scenarios` klasöründeki dosyalar), kendine özel bir bilgi bankasına (`knowledgeBase`) sahiptir. Yapay zeka, cevaplarını bu bilgi bankasındaki gerçek verilere dayandırarak üretir. Bu, "halüsinasyon" görmesini engeller ve her işletmeye (tenant) özel bilgi sunmasını sağlar.
+Bu yapı, gerçek bir telefoni sisteminin çalışma mantığını simüle eder ve platformun ölçeklenebilir, dayanıklı ve esnek olmasını sağlar.
 
 ## 🛠️ Kurulum ve Çalıştırma
 
@@ -23,27 +21,15 @@ Bu MVP, ileride kurulacak olan kapsamlı mikroservis mimarisinin iki temel prens
     ```
 
 3.  **Ortam Değişkenlerini Ayarlayın:**
-    - Projenin ana dizininde `.env` adında bir dosya oluşturun.
-    - İçine Google Gemini API anahtarınızı aşağıdaki formatta ekleyin:
-      ```
-      GEMINI_API_KEY=AIzaSy...
-      ```
+    - `.env.example` dosyasını kopyalayıp `.env` adında yeni bir dosya oluşturun.
+    - `.env` dosyasını açıp kendi API anahtarlarınızı ve ayarlarınızı girin.
+    - Google Cloud Text-to-Speech API'si için bir servis hesabı anahtarı (`.json`) oluşturup projenin kök dizinine yerleştirin ve adının `.env` dosyasındakiyle eşleştiğinden emin olun.
 
-4.  **Sunucuyu Başlatın:**
+4.  **Sunucuları Başlatın:**
+    Bu komut, hem Gateway hem de Worker sunucusunu aynı anda başlatır.
     ```bash
-    node server.js
+    npm start
     ```
 
 5.  **Uygulamayı Açın:**
-    - Tarayıcınızdan `http://localhost:3000` adresine gidin.
-
-## 🧪 Nasıl Test Edilir?
-
-- "Dinlemeyi Başlat" butonuna tıklayın.
-- Aşağıdaki gibi farklı senaryoları test edin:
-  - "Antalya'da otel bakıyorum."
-  - (Cevap sonrası) "Odalarda jakuzi var mı?"
-  - (Oturumu sıfırlayın) "Sırt ağrım için randevu alabilir miyim?"
-  - (Cevap sonrası) "Thai masajı ne kadar?"
-
-Sistem, konuşmanızın başında niyetinizi anlayıp doğru asistana (otel veya masaj) geçiş yapmalı ve sonraki sorularınızı o asistana özel bilgi bankasından cevaplamalıdır.
+    - Tarayıcınızdan `http://localhost:3000` (veya `.env`'de belirttiğiniz `GATEWAY_PORT`) adresine gidin.
