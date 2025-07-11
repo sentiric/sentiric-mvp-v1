@@ -1,3 +1,5 @@
+/* gateway/public/style.css (TAM VE EKSİKSİZ KOD) */
+
 :root {
     --arkaplan: #121212;
     --yuzey: #1e1e1e;
@@ -9,6 +11,7 @@
     --hata-rengi: #cf6679;
     --basari-rengi: #03dac6;
     --sistem-mesaj: #1f3a3d;
+    --konusuyor-rengi: #f39c12; /* Turuncu tonu */
 }
 
 * {
@@ -62,8 +65,9 @@ h1 {
 
 .durum-hazir { color: var(--ikincil-metin); }
 .durum-dinliyor { color: var(--basari-rengi); animation: pulse 1.5s infinite; }
-.durum-dusunuyor { color: #f39c12; }
+.durum-dusunuyor { color: var(--konusuyor-rengi); }
 .durum-hata { color: var(--hata-rengi); }
+.durum-konusuyor { color: var(--ana-renk); } /* Yeni durum stili */
 
 #resetButton {
     position: absolute;

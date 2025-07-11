@@ -1,125 +1,111 @@
 const { WebSocketServer } = require('ws');
 const http = require('http');
-const { exec } = require('child_process');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 const path = require('path');
 const fs = require('fs');
+const querystring = require('querystring');
 
 // --- Konfigürasyon ---
-const WORKER_PORT = 8081;
-const OLLAMA_HOST = 'localhost';
-const OLLAMA_PORT = 11434;
-const OLLAMA_MODEL = 'phi3';
+// Artık dotenv-cli ile yüklendiği için .env dosyasını burada okumaya gerek yok.
+const WORKER_PORT = process.env.WORKER_PORT || 8081;
+const LLM_MODEL_NAME = process.env.LLM_MODEL_NAME || "gemini-1.5-flash-latest";
+const DEFAULT_SYSTEM_INSTRUCTION = process.env.DEFAULT_SYSTEM_INSTRUCTION || "Sen yardımsever bir asistansın.";
 
-const PIPER_PATH = 'C:\\piper\\piper.exe';
-const PIPER_VOICE_PATH = 'C:\\piper-voices\\tr\\tr_TR\\fettah\\medium\\tr_TR-fettah-medium.onnx';
-const OUTPUT_WAV_PATH = path.resolve(__dirname, 'output.wav');
+// YEREL XTTS SUNUCUSU AYARLARI
+const XTTS_HOST = '127.0.0.1'; // 'localhost' yerine doğrudan IPv4 adresini kullanıyoruz.
+const XTTS_PORT = 5002;
 
 // --- Senaryoları Yükle ---
 const hotelScenario = require('./scenarios/hotel_booking.js');
 const massageScenario = require('./scenarios/massage_salon.js');
 const scenarios = { 'otel_rezervasyonu': hotelScenario, 'masaj_randevusu': massageScenario };
 
-// --- Sunucu ve Oturum Yönetimi ---
+// --- API İstemcilerini Başlat ---
+let genAI;
+try {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    console.log("✅ Google Gemini API istemcisi başarıyla başlatıldı.");
+} catch(e) {
+    console.error("❌ Gemini API istemcisi başlatılamadı. .env dosyasını kontrol edin.", e);
+    process.exit(1);
+}
+
 const userSessions = {};
 const wss = new WebSocketServer({ port: WORKER_PORT });
-console.log(`[Worker] ✅ Yerel Worker sunucusu ${WORKER_PORT} portunda dinliyor...`);
-console.log(`[Worker] 🤖 LLM Modeli: ${OLLAMA_MODEL} (Ollama üzerinden)`);
-console.log(`[Worker] 🗣️ TTS Motoru: Piper (Yerel)`);
+console.log(`[Worker] ✅ Hibrit Worker sunucusu ${WORKER_PORT} portunda dinliyor...`);
+console.log(`[Worker] 🤖 LLM Modeli: ${LLM_MODEL_NAME} (Google Cloud)`);
+console.log(`[Worker] 🗣️ TTS Motoru: XTTS v2 (Yerel @ ${XTTS_PORT})`);
 
-// --- WebSocket Bağlantı Mantığı ---
+
 wss.on('connection', ws => {
   console.log("[Worker] ✅ Gateway bağlandı.");
-
   ws.on('message', async (message) => {
     try {
         const data = JSON.parse(message);
         if (data.type !== 'user_transcript') return;
         
         const { sessionId, text } = data.payload;
-        console.log(`[Worker] Gelen metin: "${text}" | Oturum: ${sessionId}`);
+        // Oturum ve Yönlendirici mantığı aynı...
+        if (!userSessions[sessionId]) {
+            userSessions[sessionId] = { history: [], activeScenario: null };
+        }
+        const session = userSessions[sessionId];
         
-        const finalPrompt = `Kullanıcı diyor ki: "${text}". Kısa ve doğal bir dille cevap ver.`;
-
-        const ollamaResponse = await getOllamaResponse(finalPrompt);
-        const aiReplyText = ollamaResponse.response.trim();
-        console.log(`[Worker] Ollama Cevabı: "${aiReplyText}"`);
-
-        await generatePiperAudio(aiReplyText);
+        // --- 1. DÜŞÜNME (Google Gemini ile) ---
+        const chat = genAI.getGenerativeModel({ model: LLM_MODEL_NAME }).startChat({
+            history: session.history,
+            generationConfig: { maxOutputTokens: 100 }
+        });
+        const result = await chat.sendMessage(text);
+        const aiReplyText = result.response.text();
         
-        const audioContent = fs.readFileSync(OUTPUT_WAV_PATH).toString('base64');
+        console.log(`[Worker] Gemini Cevabı: "${aiReplyText}"`);
+        
+        // Geçmişi güncelle
+        session.history.push({ role: "user", parts: [{ text }] });
+        session.history.push({ role: "model", parts: [{ text: aiReplyText }] });
 
+        // --- 2. KONUŞMA (Yerel XTTS ile) ---
+        const audioContent = await getXttsAudio(aiReplyText);
+
+        // --- 3. CEVABI GÖNDERME ---
         ws.send(JSON.stringify({
             type: 'ai_audio',
-            payload: { 
-                sessionId, 
-                text: aiReplyText, 
-                audio: audioContent,
-                audio_format: 'wav'
-            }
+            payload: { sessionId, text: aiReplyText, audio: audioContent, audio_format: 'wav' }
         }));
-        console.log('[Worker] Yerel ses üretildi ve Gateway\'e gönderildi.');
+        console.log('[Worker] Hibrit cevap (Gemini+XTTS) üretildi ve gönderildi.');
 
     } catch (error) {
         console.error("[Worker] ❌ Mesaj işlenirken hata:", error);
-        ws.send(JSON.stringify({ type: 'error', payload: { message: "Yerel AI sunucusunda bir hata oluştu." }}));
+        ws.send(JSON.stringify({ type: 'error', payload: { message: "AI sunucusunda bir hata oluştu." }}));
     }
   });
-
   ws.on('close', () => console.log('[Worker] Gateway bağlantısı kapandı.'));
 });
 
-// --- Yardımcı Fonksiyonlar ---
-function getOllamaResponse(prompt) {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt: prompt,
-      stream: false
-    });
 
-    // *** DÜZELTME BURADA BAŞLIYOR ***
-    // Karakter sayısı yerine Buffer kullanarak bayt uzunluğunu hesaplıyoruz.
-    const postDataBytes = Buffer.byteLength(postData, 'utf-8');
-
-    const options = {
-      hostname: OLLAMA_HOST, 
-      port: OLLAMA_PORT, 
-      path: '/api/generate', 
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'Content-Length': postDataBytes // Doğru bayt uzunluğunu kullanıyoruz.
-      }
-    };
-    // *** DÜZELTME BURADA BİTİYOR ***
-
-    const req = http.request(options, (res) => {
-      let responseBody = '';
-      res.on('data', (chunk) => { responseBody += chunk; });
-      res.on('end', () => {
-        if (res.statusCode >= 400) {
-            reject(new Error(`Ollama'dan hata kodu ${res.statusCode}: ${responseBody}`));
-        } else {
-            try {
-                resolve(JSON.parse(responseBody));
-            } catch (e) {
-                reject(new Error(`Ollama'dan gelen JSON parse edilemedi: ${responseBody}`));
-            }
-        }
-      });
-    });
-    req.on('error', (e) => reject(`Ollama isteği başarısız: ${e.message}`));
-    req.write(postData);
-    req.end();
-  });
-}
-
-function generatePiperAudio(text) {
+// --- XTTS Yardımcı Fonksiyonu ---
+function getXttsAudio(text) {
     return new Promise((resolve, reject) => {
-        const command = `echo "${text.replace(/"/g, '\\"')}" | "${PIPER_PATH}" --model "${PIPER_VOICE_PATH}" --output_file "${OUTPUT_WAV_PATH}"`;
-        exec(command, (error, stdout, stderr) => {
-            if (error) return reject(`Piper hatası: ${error.message}`);
-            resolve(stdout);
+        const params = new URLSearchParams({
+            text: text,
+            speaker_wav: "female_voice.wav", // Bu bir referans ses dosyası olmalı
+            language: "tr"
+        });
+        const url = `http://${XTTS_HOST}:${XTTS_PORT}/api/tts?${params.toString()}`;
+
+        http.get(url, (res) => {
+            if (res.statusCode !== 200) {
+                return reject(new Error(`XTTS sunucusundan hata kodu ${res.statusCode}`));
+            }
+            const chunks = [];
+            res.on('data', (chunk) => chunks.push(chunk));
+            res.on('end', () => {
+                const audioBuffer = Buffer.concat(chunks);
+                resolve(audioBuffer.toString('base64'));
+            });
+        }).on('error', (e) => {
+            reject(`XTTS isteği başarısız: ${e.message}. XTTS sunucusunun çalıştığından emin misin?`);
         });
     });
 }

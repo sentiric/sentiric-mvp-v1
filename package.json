@@ -1,19 +1,22 @@
 {
-  "name": "sentiric-mvp-v1-local-ai",
+  "name": "sentiric-mvp-v1-hybrid",
   "version": "1.0.0",
-  "description": "Sentiric platformunun tamamen yerel LLM (Ollama) ve TTS (Piper) ile çalışan prototipi.",
+  "description": "Sentiric platformunun Hibrit Model (Google LLM + Yerel XTTS) prototipi.",
   "main": "index.js",
   "scripts": {
     "start": "concurrently \"npm:start:gateway\" \"npm:start:worker\"",
-    "start:gateway": "node gateway/gateway-server.js",
-    "start:worker": "node worker/worker-server.js",
+    "start:gateway": "dotenv -e .env -- node gateway/gateway-server.js",
+    "start:worker": "dotenv -e .env -- node worker/worker-server.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.15.0",
+    "dotenv": "^16.6.1",
     "express": "^4.19.2",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "dotenv-cli": "^7.4.4"
   }
 }

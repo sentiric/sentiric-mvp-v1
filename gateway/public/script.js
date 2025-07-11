@@ -1,3 +1,5 @@
+// gateway/public/script.js (TAM VE EKSİKSİZ KOD)
+
 window.SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
 if (window.SpeechRecognition) {
@@ -10,12 +12,22 @@ if (window.SpeechRecognition) {
     let sessionId = `session_${Date.now()}`;
     let audioQueue = [];
     let isPlaying = false;
+    let userSaidSomething = false;
 
-    const ws = new WebSocket(`ws://${window.location.host}`);
+    // --- AKILLI BAĞLANTI KODU ---
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    console.log(`WebSocket bağlantısı kuruluyor: ${wsUrl}`);
+    const ws = new WebSocket(wsUrl);
+    // --- AKILLI BAĞLANTI KODU SONU ---
+
 
     ws.onopen = () => console.log('Gateway sunucusuna WebSocket ile bağlandı.');
     ws.onclose = () => updateStatus('hata', 'Bağlantı kesildi.');
-    ws.onerror = () => updateStatus('hata', 'Bağlantı hatası.');
+    ws.onerror = (err) => {
+        console.error("WebSocket Hatası:", err);
+        updateStatus('hata', 'Bağlantı hatası.');
+    }
     
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -48,6 +60,8 @@ if (window.SpeechRecognition) {
         }
 
         isPlaying = true;
+        updateStatus('konusuyor', 'Yapay zeka konuşuyor...');
+
         const { text, audio, audio_format } = audioQueue.shift(); 
         addMessage(marked.parse(text), 'ai', true);
         
@@ -93,9 +107,13 @@ if (window.SpeechRecognition) {
         }
     };
     
-    recognition.onstart = () => updateStatus('dinliyor', 'Sizi dinliyorum...');
+    recognition.onstart = () => {
+        userSaidSomething = false; 
+        updateStatus('dinliyor', 'Sizi dinliyorum...');
+    }
 
     recognition.onresult = (event) => {
+        userSaidSomething = true;
         const userTranscript = event.results[0][0].transcript.trim();
         sendTranscript(userTranscript);
     };
@@ -107,8 +125,8 @@ if (window.SpeechRecognition) {
     };
 
     recognition.onend = () => {
-        if (isListening && !isPlaying) {
-            try { recognition.start(); } catch (e) { console.error("Yeniden başlatma hatası:", e); if(isListening) toggleListening(); }
+        if (isListening && !userSaidSomething) {
+            try { recognition.start(); } catch (e) {}
         }
     };
 
@@ -130,8 +148,15 @@ if (window.SpeechRecognition) {
         sessionId = `session_${Date.now()}`;
         audioQueue = [];
         isPlaying = false;
+        if (isListening) {
+            isListening = false;
+            recognition.stop();
+            toggleButton.textContent = 'Dinlemeyi Başlat';
+            toggleButton.className = 'start';
+        }
         chatBox.innerHTML = '';
         addMessage('Oturum sıfırlandı. Yeni bir konuşma başlatabilirsiniz.', 'system', true);
+        updateStatus('hazir', 'Hazır');
     });
     
     toggleButton.addEventListener('click', toggleListening);
