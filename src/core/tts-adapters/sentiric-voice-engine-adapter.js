@@ -1,36 +1,37 @@
 // src/core/tts-adapters/sentiric-voice-engine-adapter.js
 
-const http = require('http');
-const fs = require('fs');
-const FormData = require('form-data');
-const config = require('../../config');
+const http = require('http'); // Node.js'in dahili http modülü
+const fs = require('fs'); // Node.js'in dahili dosya sistemi modülü
+const FormData = require('form-data'); // Form verisi göndermek için
+const config = require('../../config'); // Merkezi konfigürasyon dosyamız
 
 async function synthesize(text, options = {}) {
     return new Promise((resolve, reject) => {
-        const { language, speed, speaker_ref } = {
+        const { language, speed } = { // speaker_ref artık burada kullanılmıyor, kaldırıldı
             language: "tr",
-            speed: 1.15,
-            speaker_ref: config.xttsSpeakerRefPath,
+            speed: 1.0, // Varsayılan hızı 1.0'a çekmek daha doğal olabilir, deneme yapın.
             ...options
         };
 
         if (!text || text.trim() === "") {
             console.warn("[SentiricVoiceEngineAdapter] Boş metin gönderilmesi engellendi.");
-            // Eğer metin boşsa ve dryRun değilse de boş string dön
+            // Eğer metin boşsa, boş bir base64 stringi dön (boş ses verisi)
             return resolve(""); 
         }
 
-        if (!speaker_ref || !fs.existsSync(speaker_ref)) {
-            console.error(`[SentiricVoiceEngineAdapter] ❌ Referans ses dosyası bulunamadı: ${speaker_ref}`);
-            console.error("[SentiricVoiceEngineAdapter] ℹ️ Lütfen .env dosyasındaki XTTS_SPEAKER_REF_PATH'in doğru ve erişilebilir bir yola işaret ettiğinden emin olun.");
-            return reject(new Error(`Referans ses dosyası bulunamadı: ${speaker_ref}`));
-        }
+        // speaker_ref kontrolünü kaldırdık, çünkü bu dosya artık sunucuda sabit olacak
+        // if (!speaker_ref || !fs.existsSync(speaker_ref)) {
+        //     console.error(`[SentiricVoiceEngineAdapter] ❌ Referans ses dosyası bulunamadı: ${speaker_ref}`);
+        //     console.error("[SentiricVoiceEngineAdapter] ℹ️ Lütfen .env dosyasındaki XTTS_SPEAKER_REF_PATH'in doğru ve erişilebilir bir yola işaret ettiğinden emin olun.");
+        //     return reject(new Error(`Referans ses dosyası bulunamadı: ${speaker_ref}`));
+        // }
         
         const form = new FormData();
         form.append('text', text);
         form.append('language', language);
         form.append('speed', String(speed));
-        form.append('speaker_ref_wav', fs.createReadStream(speaker_ref));
+        // BURAYI KALDIRDIK: Artık referans ses dosyasını her istekte göndermiyoruz!
+        // form.append('speaker_ref_wav', fs.createReadStream(speaker_ref));
 
         const requestOptions = {
             hostname: config.xttsHost,
@@ -61,11 +62,11 @@ async function synthesize(text, options = {}) {
         
         req.on('error', (e) => reject(`[SentiricVoiceEngineAdapter] XTTS POST isteği başarısız: ${e.message}. Sentiric Voice Engine sunucusunun çalıştığından emin olun.`));
         
-        form.pipe(req);
+        form.pipe(req); // Form verisini isteğe yaz
     });
 }
 
-// YENİ: Sağlık kontrolü metodu
+// YENİ: Sağlık kontrolü metodu (Değişmedi)
 async function checkHealth() {
     return new Promise((resolve, reject) => {
         const requestOptions = {
