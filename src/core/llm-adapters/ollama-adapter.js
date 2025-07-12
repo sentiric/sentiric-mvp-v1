@@ -1,11 +1,12 @@
 // src/core/llm-adapters/ollama-adapter.js
 
-const fetch = require('node-fetch'); // node-fetch'in yüklü olduğundan emin olun (npm install node-fetch@2.7.0)
-const config = require('../../config'); // config'i doğru yoldan çağır
+const fetch = require('node-fetch');
+const config = require('../../config');
 
 async function generateText(prompt) {
     const ollamaUrl = `http://${config.ollamaHost}:${config.ollamaPort}/api/generate`;
     try {
+        console.log(`[OllamaAdapter] İstek gönderiliyor: Model: ${config.ollamaModelName}, Host: ${config.ollamaHost}, Port: ${config.ollamaPort}`); // YENİ LOG
         const response = await fetch(ollamaUrl, {
             method: 'POST',
             headers: {
@@ -14,7 +15,7 @@ async function generateText(prompt) {
             body: JSON.stringify({
                 model: config.ollamaModelName,
                 prompt: prompt,
-                stream: false, // Şimdilik stream kullanmıyoruz
+                stream: false, 
             }),
         });
 
@@ -24,10 +25,10 @@ async function generateText(prompt) {
         }
 
         const data = await response.json();
-        return data.response.trim(); // Ollama'nın yanıt formatı 'response' alanında gelir
+        return data.response.trim();
     } catch (error) {
         console.error("[OllamaAdapter] ❌ Metin üretimi sırasında hata:", error.message);
-        console.error("[OllamaAdapter] ℹ️ Ollama sunucusunun çalıştığından ve 'phi3' modelinin yüklü olduğundan emin olun (`ollama pull phi3`).");
+        console.error("[OllamaAdapter] ℹ️ Ollama sunucusunun çalıştığından ve belirtilen modelin (`ollama pull YOUR_MODEL_NAME`) yüklü olduğundan emin olun."); // Hata mesajı düzeltildi
         throw error;
     }
 }

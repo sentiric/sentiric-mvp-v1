@@ -14,7 +14,7 @@ async function synthesize(text, options = {}) {
 
         const defaultOptions = {
             language: "tr",
-            speed: 1.15,
+            speed: 1.80,
             speaker_ref: config.xttsSpeakerRefPath 
         };
         const finalOptions = { ...defaultOptions, ...options };
