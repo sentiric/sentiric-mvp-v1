@@ -10,15 +10,19 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>Sentiric</h1>
             <p id="durum" class="durum-hazir">Hazır</p>
+            <h1>Sentiric</h1>
+            <p id="ttsStatus" class="tts-status tts-status-unknown">TTS Durumu: Bilinmiyor</p> <!-- YENİ: TTS Durum Göstergesi -->
             <button id="resetButton" title="Yeni bir konuşma başlatmak için oturumu sıfırla">Oturumu Sıfırla</button>
         </div>
         
-        <div id="chatBox">
-             <div class="message system-card">
-                <p>Merhaba, ben Sentiric. Size nasıl yardımcı olabilirim?</p>
-             </div>
+        <div class="main-content"> <!-- YENİ: Ana içerik için flex container -->
+            <div id="chatBox">
+                 <div class="message system-card">
+                    <p>Merhaba, ben Sentiric. Size nasıl yardımcı olabilirim?</p>
+                 </div>
+            </div>
+            <div id="sessionInfo"></div> <!-- YENİ: Oturum Bilgisi Paneli -->
         </div>
         
         <div class="kontrol-paneli">
