@@ -16,7 +16,66 @@ async function generateText(prompt) {
     return llmAdapter.generateText(prompt);
 }
 
-// YENİ FONKSİYON: Bilgi bankası (context) kullanarak soru yanıtlama
+// YENİ FONKSİYON: Kullanıcı metninden birden fazla parametre çıkarmak için
+// paramDefinitions: [{name: 'location', question: '...'}] formatında bir dizi
+async function extractMultipleParameters(userText, paramDefinitions) {
+    // LLM'e tüm beklenen parametreleri ve onların sorularını gönderiyoruz.
+    // LLM'den, yalnızca kullanıcının metninde (userText) geçen, bu tanımlara uyan değerleri çıkarmasını istiyoruz.
+    // Eğer bir değer geçmiyorsa, JSON çıktısında o alanı null olarak bırakmasını belirtiyoruz.
+    const prompt = `Kullanıcının şu cevabından: "${userText}", aşağıdaki parametreleri çıkar. Yanıtını sadece bir JSON objesi olarak ver. Bu objede, her parametre için bir anahtar ve çıkarılan değer bulunsun. Eğer bir parametre için metinde açıkça bir değer belirtilmemişse, o anahtara null değerini ata. Başka hiçbir metin veya açıklama ekleme.
+
+Parametreler ve beklenen türleri/örnekleri:
+${paramDefinitions.map(p => `- '${p.name}': ${p.name === 'people_count' ? 'sayı' : p.name === 'budget' ? 'sayı' : 'metin'}`).join('\n')}
+
+Örnek çıktı formatı:
+{
+  "location": "Antalya",
+  "checkin_date": "15 Temmuz 2025",
+  "people_count": 2,
+  "budget": null
+}`;
+
+    let responseText = '';
+    try {
+        responseText = await generateText(prompt);
+        console.log("[AI Handler] LLM Ham Yanıtı (Çoklu Parametre):", responseText);
+
+        const jsonStringMatch = responseText.match(/\{.*?\}/s);
+        if (!jsonStringMatch || !jsonStringMatch[0]) {
+            console.warn("[AI Handler] ⚠️ LLM yanıtında geçerli bir JSON objesi bulunamadı (Çoklu Parametre). Ham yanıt:", responseText);
+            return {}; // Boş obje döndür, Worker bunu işleyebilir
+        }
+
+        const jsonString = jsonStringMatch[0];
+        console.log("[AI Handler] Çıkarılan JSON Dizisi (Çoklu Parametre):", jsonString);
+
+        const extracted = JSON.parse(jsonString);
+
+        // LLM'in her zaman 'value' döndürme eğiliminde olması ihtimaline karşı bir güvenlik katmanı
+        // Eğer LLM tek bir 'value' döndürdüyse ve beklenen çoklu parametreler yoksa, o 'value'yu almayız.
+        // Bu fonksiyon, birden fazla anahtar içeren bir obje bekler.
+        if (typeof extracted === 'object' && extracted !== null && Object.keys(extracted).length > 0) {
+            // Null olarak dönen değerleri gerçek null yapalım (string "null" ise)
+            for (const key in extracted) {
+                if (typeof extracted[key] === 'string' && extracted[key].toLowerCase().trim() === 'null') {
+                    extracted[key] = null;
+                }
+            }
+            return extracted;
+        } else {
+            console.warn("[AI Handler] ⚠️ LLM yanıtı beklenen çoklu parametre formatında değil veya boş. Ham JSON:", extracted);
+            return {};
+        }
+
+    } catch (error) {
+        console.error("[AI Handler] ❌ Çoklu parametre çıkarımı sırasında hata:", error.message);
+        console.error("[AI Handler] Hata alınan metin (Çoklu Parametre):", responseText);
+        return {}; // Hata durumunda boş obje döndür
+    }
+}
+
+
+// Bilgi bankası (context) kullanarak soru yanıtlama
 async function answerQuestionWithContext(userQuestion, knowledgeBase) {
     const prompt = `Aşağıdaki bilgilerden yola çıkarak, kullanıcının "${userQuestion}" sorusuna mümkün olan en kısa ve net cevabı ver. Eğer bilgi bulunmuyorsa, 'Üzgünüm, bu konuda bilgiye sahip değilim.' şeklinde yanıt ver.\n\nBilgiler:\n${JSON.stringify(knowledgeBase.faqs.map(f => ({ question: f.question, answer: f.answer })))}`;
 
@@ -30,63 +89,6 @@ async function answerQuestionWithContext(userQuestion, knowledgeBase) {
     }
 }
 
-
-async function extractParameters(text, paramName, question) { 
-    let specificPrompt = '';
-
-    const baseInstruction = "Sadece ve sadece JSON formatında yanıt ver. Bu objenin içinde tek bir anahtar 'value' olsun. Başka hiçbir metin, açıklama veya formatlama olmamalı. Eğer ilgili bilgi metinde açıkça belirtilmemişse, 'value' anahtarına null değerini ata.";
-
-    if (paramName === 'people_count') {
-        specificPrompt = `Kullanıcının şu cevabından: "${text}", kaç kişi olduğunu bir sayı olarak çıkar. ${baseInstruction} Örnek: {"value": "2"} veya {"value": null}`;
-    } else if (paramName === 'budget') {
-        specificPrompt = `Kullanıcının şu cevabından: "${text}", bütçesini (sadece sayısal değeri) çıkar. ${baseInstruction} Örnek: {"value": "1000"} veya {"value": null}`;
-    } else if (paramName === 'location') { 
-        specificPrompt = `Kullanıcının şu cevabından: "${text}", otel rezervasyonu için hangi şehirde olduğunu çıkar. Yanıtını sadece bir JSON objesi olarak ver ve bu objenin içinde tek bir anahtar 'value' olsun. Başka hiçbir metin, açıklama veya formatlama olmamalı. Eğer şehir metinde açıkça belirtilmemişse, 'value' anahtarına null değerini ata. Örnek: {"value": "Antalya"} veya {"value": null}`;
-    } else {
-        specificPrompt = `Kullanıcının şu cevabından: "${text}", sorulan şu soruya karşılık gelen değeri çıkar: "${question}". ${baseInstruction} Örnek: {"value": "15 Temmuz"} veya {"value": null}`;
-    }
-    
-    let responseText = '';
-    try {
-        responseText = await generateText(specificPrompt); 
-        console.log("[AI Handler] LLM Ham Yanıtı:", responseText); 
-        
-        const jsonStringMatch = responseText.match(/\{.*?\}/s); 
-        
-        if (!jsonStringMatch || !jsonStringMatch[0]) {
-            console.warn("[AI Handler] ⚠️ LLM yanıtında geçerli bir JSON objesi bulunamadı. Ham yanıt:", responseText);
-            return null; 
-        }
-
-        const jsonString = jsonStringMatch[0];
-        console.log("[AI Handler] Çıkarılan JSON Dizisi:", jsonString); 
-
-        const extracted = JSON.parse(jsonString);
-        
-        if (extracted && extracted.value !== undefined) {
-            if (extracted.value === null || String(extracted.value).trim().toLowerCase() === 'null') {
-                return null;
-            }
-            return extracted.value;
-        } else if (extracted && Object.keys(extracted).length === 1) {
-            const firstKey = Object.keys(extracted)[0];
-            const valueFromFirstKey = extracted[firstKey];
-            if (valueFromFirstKey === null || String(valueFromFirstKey).trim().toLowerCase() === 'null') {
-                return null;
-            }
-            console.warn(`[AI Handler] ⚠️ LLM 'value' anahtarı yerine '${firstKey}' anahtarını döndürdü. Değeri bu anahtardan alınıyor.`);
-            return valueFromFirstKey;
-        } else {
-            console.warn("[AI Handler] ⚠️ LLM yanıtı beklenen 'value' anahtarını içermiyor veya beklenmedik formatta. Ham JSON:", extracted);
-            return null;
-        }
-
-    } catch (error) {
-        console.error("[AI Handler] ❌ Bilgi çıkarımı sırasında hata (JSON ayrıştırma veya LLM yanıtı formatı):", error.message);
-        console.error("[AI Handler] Hata alınan metin:", responseText); 
-        return null;
-    }
-}
 
 async function getImageUrl(query) {
     if (!config.pexelsApiKey) {
@@ -108,7 +110,7 @@ async function getImageUrl(query) {
 
 module.exports = { 
     generateText, 
-    extractParameters, 
+    extractMultipleParameters, // YENİ: Tekil yerine çoklu parametre çıkarma fonksiyonu
     getImageUrl,
-    answerQuestionWithContext // Yeni fonksiyonu dışa aktar
+    answerQuestionWithContext 
 };

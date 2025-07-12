@@ -5,17 +5,19 @@ const dbHandler = require('../core/db-handler');
 const aiHandler = require('../core/ai-handler');
 const ttsHandler = require('../core/tts-handler');
 const hotelScenario = require('../scenarios/hotel_booking');
-const informationRequestScenario = require('../scenarios/information_request'); // Yeni senaryoyu import et
-const knowledgeBase = require('../../data/knowledge_base.json'); // Bilgi bankasını import et
+const informationRequestScenario = require('../scenarios/information_request'); 
+const knowledgeBase = require('../../data/knowledge_base.json'); 
 
 const scenarios = { 
     'otel_rezervasyonu': hotelScenario,
-    'information_request': informationRequestScenario // Yeni senaryoyu ekle
+    'information_request': informationRequestScenario 
 };
 const userSessions = {};
 const wss = new WebSocketServer({ port: config.workerPort });
 
 console.log(`[Worker] ✅ Profesyonel Worker ${config.workerPort} portunda dinliyor...`);
+
+// validateExtractedValue fonksiyonu değişmedi
 
 function validateExtractedValue(paramName, value) {
     if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
@@ -77,7 +79,6 @@ wss.on('connection', ws => {
                 userSessions[sessionId] = { 
                     scenarioId: null,
                     params: {},
-                    lastQuestionParam: null,
                     misunderstandingCount: 0 
                 };
             }
@@ -89,12 +90,10 @@ wss.on('connection', ws => {
             const initialTrigger = !session.scenarioId; 
 
             if (initialTrigger) { 
-                // Önce bilgi talebi senaryosunu kontrol et
                 if (informationRequestScenario.trigger_keywords.some(keyword => text.toLowerCase().includes(keyword))) {
                     session.scenarioId = informationRequestScenario.id;
                     console.log(`[Worker] Senaryo bulundu: ${session.scenarioId} (Bilgi Talebi)`);
                 } else {
-                    // Sonra diğer senaryoları kontrol et
                     for (const scenario of Object.values(scenarios)) {
                         if (scenario.id !== 'information_request' && scenario.trigger_keywords.some(keyword => text.toLowerCase().includes(keyword))) {
                             session.scenarioId = scenario.id;
@@ -109,39 +108,48 @@ wss.on('connection', ws => {
 
             if (currentScenario) {
                 if (currentScenario.id === 'information_request') {
-                    // Bilgi Talebi Senaryosu için özel işlem
                     spokenResponse = await aiHandler.answerQuestionWithContext(text, knowledgeBase);
                     displayData = { type: 'info_request', text: `💬 ${spokenResponse}` };
-                    // Bilgi talebi senaryosunda oturumu sıfırla, çünkü tek seferlik bir yanıt beklenir
                     delete userSessions[sessionId]; 
 
                 } else {
-                    // Diğer Senaryolar (örn. Otel Rezervasyonu) için mevcut mantık
-                    if (session.lastQuestionParam || initialTrigger) { 
-                        let paramToExtractFor = null;
-                        if(session.lastQuestionParam) {
-                            paramToExtractFor = session.lastQuestionParam.name;
-                        } else if (initialTrigger && currentScenario.required_params.length > 0) {
-                            paramToExtractFor = currentScenario.required_params[0].name;
-                        }
+                    // YENİ: Çoklu parametre çıkarma mantığı
+                    const missingParams = currentScenario.required_params.filter(p => !session.params[p.name]);
+                    let anyParamExtractedSuccessfully = false;
 
-                        if (paramToExtractFor) { 
-                            const extractedValue = await aiHandler.extractParameters(text, paramToExtractFor, session.lastQuestionParam ? session.lastQuestionParam.question : `Kullanıcının "${text}" cevabından bir ${paramToExtractFor} değeri çıkar.`);
-                            
-                            if (extractedValue && validateExtractedValue(paramToExtractFor, extractedValue)) {
-                                session.params[paramToExtractFor] = extractedValue;
-                                session.misunderstandingCount = 0; 
-                                console.log(`[Worker] Bilgi çıkarıldı: {${paramToExtractFor}: "${extractedValue}"}`);
-                            } else {
-                                if (!initialTrigger) { 
-                                    session.misunderstandingCount++;
-                                    console.warn(`[Worker] ⚠️ Parametre çıkarılamadı veya geçersiz: '${text}'. Anlayamama sayısı: ${session.misunderstandingCount}`);
-                                } else {
-                                    console.log(`[Worker] ℹ️ İlk tetikleyici mesajdan beklenen parametre çıkarılamadı, normal akış devam edecek.`);
-                                }
+                    // Sadece hala eksik olan parametreleri LLM'e soruyoruz
+                    if (missingParams.length > 0) {
+                        const extractedValues = await aiHandler.extractMultipleParameters(text, missingParams);
+                        
+                        // Çıkarılan her bir değeri kontrol edip session'a ekle
+                        for (const paramDef of missingParams) {
+                            const extractedValue = extractedValues[paramDef.name]; // LLM'den gelen değer
+                            if (extractedValue && validateExtractedValue(paramDef.name, extractedValue)) {
+                                session.params[paramDef.name] = extractedValue;
+                                console.log(`[Worker] Bilgi çıkarıldı: {${paramDef.name}: "${extractedValue}"}`);
+                                anyParamExtractedSuccessfully = true;
+                            } else if (extractedValue === null) { // LLM açıkça null döndürdüyse
+                                console.log(`[Worker] ℹ️ LLM '${paramDef.name}' için null döndürdü.`);
+                            } else if (extractedValue !== undefined) { // LLM bir değer döndürdü ama validasyondan geçmedi
+                                console.warn(`[Worker] ⚠️ Parametre '${paramDef.name}' için çıkarılan değer geçersiz: '${extractedValue}'`);
                             }
                         }
+
+                        // Eğer hiçbir parametre başarılı bir şekilde çıkarılamadıysa veya geçerli değilse,
+                        // ve bu ilk tetikleyici mesaj değilse (yani sistem bir soru sormuşsa),
+                        // anlayamama sayacını artır.
+                        if (!anyParamExtractedSuccessfully && !initialTrigger) {
+                            session.misunderstandingCount++;
+                            console.warn(`[Worker] ⚠️ Hiçbir beklenen parametre çıkarılamadı veya geçersiz. Anlayamama sayısı: ${session.misunderstandingCount}`);
+                        } else if (!anyParamExtractedSuccessfully && initialTrigger) {
+                            console.log(`[Worker] ℹ️ İlk tetikleyici mesajdan herhangi bir beklenen parametre çıkarılamadı.`);
+                        } else { // En az bir parametre başarılı ise sayacı sıfırla
+                            session.misunderstandingCount = 0;
+                        }
                     }
+
+                    // Artık lastQuestionParam'ı sadece sıradaki soruyu belirlemek için kullanacağız.
+                    // session.lastQuestionParam = null; // Bu satırı kaldırabiliriz, zaten dinamik belirlenecek.
 
                     if (session.misunderstandingCount >= 2) { 
                         spokenResponse = "Üzgünüm, sizi tam olarak anlayamadım. Lütfen bilgiyi daha net bir şekilde tekrar edebilir misiniz?";
@@ -152,7 +160,9 @@ wss.on('connection', ws => {
                         
                         if (nextParamToAsk) {
                             spokenResponse = nextParamToAsk.question;
-                            session.lastQuestionParam = nextParamToAsk;
+                            // session.lastQuestionParam'ı burada güncelliyoruz, ama artık tek bir parametreyi temsil etmiyor
+                            // Sadece sıradaki soruyu tutmak için kullanıyoruz
+                            session.lastQuestionParam = nextParamToAsk; 
                             displayData = { type: 'info_request', text: `💬 ${spokenResponse}` };
                         } else {
                             const reservationData = { type: currentScenario.id, params: session.params, status: 'confirmed' };
@@ -168,9 +178,9 @@ wss.on('connection', ws => {
                     }
                 }
             } else {
-                spokenResponse = "Size nasıl yardımcı olabilirim? Örneğin, 'otel rezervasyonu yapmak istiyorum' veya 'çalışma saatleriniz nedir?' diyebilirsiniz."; // Yeni örnekler eklendi
+                spokenResponse = "Size nasıl yardımcı olabilirim? Örneğin, 'otel rezervasyonu yapmak istiyorum' veya 'çalışma saatleriniz nedir?' diyebilirsiniz."; 
                 displayData = { type: 'info_request', text: spokenResponse };
-                session.lastQuestionParam = null; 
+                // session.lastQuestionParam = null; // Bu satırı artık buraya gerek yok
             }
 
             const audioContent = await ttsHandler.getXttsAudio(spokenResponse);
