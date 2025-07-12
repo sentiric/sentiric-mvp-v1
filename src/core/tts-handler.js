@@ -1,14 +1,9 @@
-// src/core/tts-handler.js (TAM VE EKSİKSİZ KOD)
+// src/core/tts-handler.js (TAM VE EKSİKSİZ KOD - DOSYA YÜKLEMELİ)
 
 const http = require('http');
+const fs = require('fs'); // 'fs/promises' değil, senkron kontrol için 'fs'
+const FormData = require('form-data');
 const config = require('../config');
-
-// --- Varsayılan Ayarlar ---
-const DEFAULT_TTS_OPTIONS = {
-    language: "tr",
-    speed: 1.15,
-    speaker_ref: "C:\\TTS\\speaker_ref.wav" 
-};
 
 function getXttsAudio(text, options = {}) {
     return new Promise((resolve, reject) => {
@@ -17,46 +12,53 @@ function getXttsAudio(text, options = {}) {
             return resolve(""); 
         }
 
-        const finalOptions = { ...DEFAULT_TTS_OPTIONS, ...options };
-        const params = new URLSearchParams(finalOptions);
-        params.append('text', text);
+        const defaultOptions = {
+            language: "tr",
+            speed: 1.15,
+            speaker_ref: config.xttsSpeakerRefPath 
+        };
+        const finalOptions = { ...defaultOptions, ...options };
 
-        const url = `http://${config.xttsHost}:${config.xttsPort}/api/tts?${params.toString()}`;
-        console.log(`[TTS Handler] İstek gönderiliyor: ${url}`);
+        if (!finalOptions.speaker_ref || !fs.existsSync(finalOptions.speaker_ref)) {
+            return reject(new Error(`[TTS Handler] Referans ses dosyası bulunamadı: ${finalOptions.speaker_ref}`));
+        }
+        
+        const form = new FormData();
+        form.append('text', text);
+        form.append('language', finalOptions.language);
+        form.append('speed', String(finalOptions.speed));
+        form.append('speaker_ref_wav', fs.createReadStream(finalOptions.speaker_ref));
 
-        http.get(url, (res) => {
+        const requestOptions = {
+            hostname: config.xttsHost,
+            port: config.xttsPort,
+            path: '/api/tts',
+            method: 'POST',
+            headers: form.getHeaders(),
+        };
+
+        console.log(`[TTS Handler] POST isteği gönderiliyor: http://${config.xttsHost}:${config.xttsPort}/api/tts`);
+
+        const req = http.request(requestOptions, (res) => {
             if (res.statusCode !== 200) {
                 let errorData = '';
-                res.on('data', (chunk) => errorData += chunk);
-                res.on('end', () => {
-                    console.error(`[TTS Handler] XTTS Hata Detayı: ${errorData}`);
-                    reject(new Error(`XTTS sunucusundan hata kodu ${res.statusCode}`));
-                });
+                res.on('data', chunk => errorData += chunk);
+                res.on('end', () => reject(new Error(`XTTS sunucusundan hata kodu ${res.statusCode}: ${errorData}`)));
                 return;
             }
 
-            // --- CIZIRTIYI GİDEREN DÜZELTME BURADA ---
-            // Gelen ham ses verisini (binary) bir Buffer dizisi olarak topluyoruz.
             const chunks = [];
-            res.on('data', (chunk) => {
-                chunks.push(chunk);
-            });
-            
+            res.on('data', (chunk) => chunks.push(chunk));
             res.on('end', () => {
-                // Tüm parçaları tek bir Buffer nesnesinde birleştiriyoruz.
                 const audioBuffer = Buffer.concat(chunks);
-                // Bu Buffer'ı doğrudan Base64 formatına çeviriyoruz.
-                // Veri kaybı veya bozulma olmuyor.
-                const base64Audio = audioBuffer.toString('base64');
-                
-                resolve(base64Audio);
-                console.log(`[TTS Handler] ✅ Ses verisi başarıyla alındı ve Base64'e çevrildi.`);
+                resolve(audioBuffer.toString('base64'));
+                console.log(`[TTS Handler] ✅ Ses verisi POST ile başarıyla alındı.`);
             });
-            // --- DÜZELTME SONU ---
-
-        }).on('error', (e) => {
-            reject(`[TTS Handler] XTTS isteği başarısız: ${e.message}.`);
         });
+        
+        req.on('error', (e) => reject(`[TTS Handler] XTTS POST isteği başarısız: ${e.message}.`));
+        
+        form.pipe(req);
     });
 }
 

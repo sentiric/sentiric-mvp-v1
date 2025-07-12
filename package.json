@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "description": "Sentiric'in Pexels görselli, güvenli veritabanlı ve akıllı form mantıklı profesyonel prototipi.",
   "main": "index.js",
-
-"scripts": {
+  "scripts": {
     "start": "concurrently \"npm:start:gateway\" \"npm:start:worker\"",
     "start:gateway": "node src/services/gateway.js",
     "start:worker": "node src/services/worker.js",
@@ -14,6 +13,7 @@
     "@google/generative-ai": "^0.15.0",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
+    "form-data": "^4.0.3",
     "node-fetch": "^2.7.0",
     "uuid": "^11.1.0",
     "ws": "^8.18.0"
