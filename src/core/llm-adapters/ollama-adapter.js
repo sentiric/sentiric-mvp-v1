@@ -3,20 +3,32 @@
 const fetch = require('node-fetch');
 const config = require('../../config');
 
-async function generateText(prompt) {
-    const ollamaUrl = `http://${config.ollamaHost}:${config.ollamaPort}/api/generate`;
+// Fonksiyonun adını daha genel hale getiriyoruz.
+async function generateContent(prompt, tools = []) {
+    const ollamaUrl = `http://${config.ollamaHost}:${config.ollamaPort}/api/chat`; // Chat endpoint'ini kullanmak daha iyi sonuç verir
+    
+    // Ollama'nın beklediği mesaj formatını oluştur
+    const messages = [{ role: 'user', content: prompt }];
+    
+    const body = {
+        model: config.ollamaModelName,
+        messages: messages,
+        stream: false,
+    };
+
+    // ⭐️ YENİ: Eğer 'tools' varsa, isteğe ekle ⭐️
+    if (tools && tools.length > 0) {
+        body.tools = tools;
+        // Not: Ollama'ya modelin bu araçları kullanması için ek bir talimat vermek faydalı olabilir.
+        // Bu, sistem prompt'u ile daha da geliştirilebilir.
+    }
+
     try {
-        console.log(`[OllamaAdapter] İstek gönderiliyor: Model: ${config.ollamaModelName}, Host: ${config.ollamaHost}, Port: ${config.ollamaPort}`); // YENİ LOG
+        console.log(`[OllamaAdapter] Chat isteği gönderiliyor. Model: ${config.ollamaModelName}`);
         const response = await fetch(ollamaUrl, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                model: config.ollamaModelName,
-                prompt: prompt,
-                stream: false, 
-            }),
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
         });
 
         if (!response.ok) {
@@ -25,14 +37,15 @@ async function generateText(prompt) {
         }
 
         const data = await response.json();
-        return data.response.trim();
+        // Ollama chat cevabı 'message' objesi içinde gelir
+        return data.message; 
     } catch (error) {
         console.error("[OllamaAdapter] ❌ Metin üretimi sırasında hata:", error.message);
-        console.error("[OllamaAdapter] ℹ️ Ollama sunucusunun çalıştığından ve belirtilen modelin (`ollama pull YOUR_MODEL_NAME`) yüklü olduğundan emin olun."); // Hata mesajı düzeltildi
+        console.error("[OllamaAdapter] ℹ️ Ollama sunucusunun çalıştığından ve modelin (`" + config.ollamaModelName + "`) yüklü olduğundan emin olun.");
         throw error;
     }
 }
 
 module.exports = {
-    generateText,
+    generateContent, // Dışa aktarılan fonksiyonun adını güncelledik
 };
