@@ -201,7 +201,15 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log("SpeechRecognition ended after user spoke. Awaiting AI response.");
         }
     };
-    recognition.onerror = (event) => { 
+    recognition.onerror = (event) => {
+        // Sadece "no-speech" hatasını görmezden gel, ama konsola logla.
+        if (event.error === 'no-speech') {
+            console.warn("SpeechRecognition: No speech detected. Awaiting user input.");
+            updateStatus('dinliyor', 'Sizi dinliyorum...'); // Durumu tekrar 'dinliyor' yap
+            return; // UI'da hata gösterme
+        }
+        
+        // Diğer tüm hataları UI'da göster
         console.error("SpeechRecognition error:", event.error);
         updateStatus('hata', `Ses Tanıma Hatası: ${event.error}`);
         addMessage(`<p>Ses tanıma sırasında bir hata oluştu: ${event.error}. Mikrofonunuzu kontrol edin veya sayfayı yenileyin.</p>`, 'error-card');

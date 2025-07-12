@@ -3,28 +3,18 @@
 const fetch = require('node-fetch');
 const config = require('../../config');
 
-// Fonksiyonun adını daha genel hale getiriyoruz.
-async function generateContent(prompt, tools = []) {
-    const ollamaUrl = `http://${config.ollamaHost}:${config.ollamaPort}/api/chat`; // Chat endpoint'ini kullanmak daha iyi sonuç verir
-    
-    // Ollama'nın beklediği mesaj formatını oluştur
-    const messages = [{ role: 'user', content: prompt }];
+async function generateText(prompt) {
+    const ollamaUrl = `http://${config.ollamaHost}:${config.ollamaPort}/api/generate`;
     
     const body = {
         model: config.ollamaModelName,
-        messages: messages,
+        prompt: prompt,
         stream: false,
+        format: "json" // ⭐️ OLLAMA'DAN KESİNLİKLE JSON ÇIKTISI İSTİYORUZ. BU ÇOK KRİTİK.
     };
 
-    // ⭐️ YENİ: Eğer 'tools' varsa, isteğe ekle ⭐️
-    if (tools && tools.length > 0) {
-        body.tools = tools;
-        // Not: Ollama'ya modelin bu araçları kullanması için ek bir talimat vermek faydalı olabilir.
-        // Bu, sistem prompt'u ile daha da geliştirilebilir.
-    }
-
     try {
-        console.log(`[OllamaAdapter] Chat isteği gönderiliyor. Model: ${config.ollamaModelName}`);
+        console.log(`[OllamaAdapter] Generate (JSON format) isteği gönderiliyor. Model: ${config.ollamaModelName}`);
         const response = await fetch(ollamaUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -33,19 +23,23 @@ async function generateContent(prompt, tools = []) {
 
         if (!response.ok) {
             const errorText = await response.text();
-            throw new Error(`Ollama API'den hata kodu ${response.status}: ${errorText}`);
+            console.error("[OllamaAdapter] ❌ Ollama API'den gelen ham hata yanıtı:", errorText);
+            throw new Error(`Ollama API'den hata kodu ${response.status}`);
         }
 
         const data = await response.json();
-        // Ollama chat cevabı 'message' objesi içinde gelir
-        return data.message; 
+        
+        // Gelen yanıtın stringified bir JSON olduğunu varsayıp parse ediyoruz.
+        console.log("[OllamaAdapter] LLM'den gelen Ham Yanıt (Stringified JSON):", data.response);
+        return JSON.parse(data.response);
+
     } catch (error) {
         console.error("[OllamaAdapter] ❌ Metin üretimi sırasında hata:", error.message);
-        console.error("[OllamaAdapter] ℹ️ Ollama sunucusunun çalıştığından ve modelin (`" + config.ollamaModelName + "`) yüklü olduğundan emin olun.");
-        throw error;
+        // Hata durumunda, orkestratörün başa çıkabilmesi için null döndürelim.
+        return null; 
     }
 }
 
 module.exports = {
-    generateContent, // Dışa aktarılan fonksiyonun adını güncelledik
+    generateText,
 };

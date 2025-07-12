@@ -1,40 +1,30 @@
 // src/scenarios/hotel_booking.js
 
-const hotelBookingTool = {
-  // Bu, LLM'in kullanacağı fonksiyonun adı
-  name: "otel_rezervasyonu_yap", 
-  // Bu açıklama, LLM'in bu aracı NE ZAMAN kullanacağını anlamasına yardımcı olur
-  description: "Bir müşteri için otel rezervasyonu yapar. Gerekli tüm parametreler (konum, tarih, kişi sayısı) toplandığında bu aracı kullan.",
-  // Bu, aracın hangi parametreleri kabul ettiğini ve hangilerinin zorunlu olduğunu belirtir
-  parameters: {
-    type: "OBJECT",
-    properties: {
-      location: {
-        type: "STRING",
-        description: "Rezervasyonun yapılacağı şehir veya bölge, örn: 'Antalya', 'Taksim Meydanı'",
-      },
-      checkin_date: {
-        type: "STRING",
-        description: "Otele giriş yapılacak tarih, örn: 'yarın', '25 Ağustos 2025'",
-      },
-      people_count: {
-        type: "NUMBER",
-        description: "Konaklayacak toplam kişi sayısı",
-      },
-      budget: { // Bütçeyi opsiyonel yapalım
-        type: "NUMBER",
-        description: "Gecelik kişi başı bütçe (isteğe bağlı)",
-      },
-    },
-    // Bu parametreler olmadan fonksiyon çağrılamaz
-    required: ["location", "checkin_date", "people_count"],
-  },
-};
-
 module.exports = {
+  // Senaryoyu tanımak için kullanılan ID
   id: 'otel_rezervasyonu',
-  // Tetikleyici anahtar kelimeler hala faydalı olabilir
-  trigger_keywords: ['otel', 'oda', 'rezervasyon', 'konaklama'],
-  // En önemli kısım: LLM için araç tanımı
-  tool_definition: hotelBookingTool
+  
+  // Senaryoyu tetiklemek için anahtar kelimeler
+  trigger_keywords: ['otel', 'oda', 'rezervasyon', 'konaklama', 'yer ayırt'],
+  
+  // Prompt'a eklenecek olan, LLM'e aracı nasıl kullanacağını anlatan metin.
+  tool_description: `
+- Function: otel_rezervasyonu_yap(location: string, checkin_date: string, people_count: number, budget?: number)
+- Description: Müşteri için bir otel rezervasyonu oluşturur. 'location', 'checkin_date' ve 'people_count' parametreleri zorunludur. 'budget' isteğe bağlıdır.
+  `,
+
+  // LLM'in uyması gereken katı JSON çıktı formatı.
+  output_format: {
+    "thought": "Buraya kullanıcının isteğini nasıl anladığını ve bir sonraki adımının ne olacağını adım adım yaz. Örneğin: 'Kullanıcı otel rezervasyonu yapmak istiyor. Şu bilgiler mevcut: [mevcut bilgiler]. Şu bilgiler eksik: [eksik bilgiler]. Bu yüzden eksik olan ilk bilgiyi soracağım.'",
+    "action": {
+      "tool_name": "kullanılacak_fonksiyonun_adı_veya_null",
+      "parameters": {
+        "location": "çıkarılan_konum_veya_null",
+        "checkin_date": "çıkarılan_tarih_veya_null",
+        "people_count": "çıkarılan_kişi_sayısı_veya_null",
+        "budget": "çıkarılan_bütçe_veya_null"
+      }
+    },
+    "speak": "Eğer ek bilgiye ihtiyaç varsa, kullanıcıya sorulacak bir sonraki kısa ve net soru. Eğer tüm bilgiler tamamsa bu alan null olmalı."
+  }
 };
