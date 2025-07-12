@@ -5,19 +5,23 @@ const dbHandler = require('../core/db-handler');
 const aiHandler = require('../core/ai-handler');
 const ttsHandler = require('../core/tts-handler');
 const hotelScenario = require('../scenarios/hotel_booking');
+const informationRequestScenario = require('../scenarios/information_request'); // Yeni senaryoyu import et
+const knowledgeBase = require('../../data/knowledge_base.json'); // Bilgi bankasını import et
 
-const scenarios = { 'otel_rezervasyonu': hotelScenario };
+const scenarios = { 
+    'otel_rezervasyonu': hotelScenario,
+    'information_request': informationRequestScenario // Yeni senaryoyu ekle
+};
 const userSessions = {};
 const wss = new WebSocketServer({ port: config.workerPort });
 
 console.log(`[Worker] ✅ Profesyonel Worker ${config.workerPort} portunda dinliyor...`);
 
 function validateExtractedValue(paramName, value) {
-    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) { // String kontrolü eklendi
+    if (value === null || value === undefined || (typeof value === 'string' && value.trim() === '')) {
         return false;
     }
 
-    // Değeri her zaman string'e çevirerek işlem yap, sonra tipine göre ayrıştır
     const stringValue = String(value).toLowerCase();
 
     switch (paramName) {
@@ -29,14 +33,13 @@ function validateExtractedValue(paramName, value) {
             }
             return true;
         case 'people_count':
-            const numPeople = parseInt(stringValue, 10); // stringValue kullan
+            const numPeople = parseInt(stringValue, 10); 
             if (isNaN(numPeople) || numPeople <= 0 || numPeople > 99) { 
                 console.warn(`[Worker - Validation] ⚠️ Kişi sayısı geçersiz: '${value}'`);
                 return false;
             }
             return true;
         case 'budget':
-            // Sadece sayıları al, stringValue üzerinde işlem yap
             const numBudget = parseInt(stringValue.replace(/[^0-9]/g, ''), 10); 
             if (isNaN(numBudget) || numBudget <= 0) {
                 console.warn(`[Worker - Validation] ⚠️ Bütçe geçersiz: '${value}'`);
@@ -59,13 +62,12 @@ wss.on('connection', ws => {
     console.log("[Worker] ✅ Gateway bağlandı.");
     ws.on('message', async (rawMessage) => {
         let sourceClientId = null;
-        let sessionIdForError = 'unknown'; // Hata bloğu için tanımlandı
+        let sessionIdForError = 'unknown'; 
         try {
             const messageData = JSON.parse(rawMessage);
             sourceClientId = messageData.sourceClientId;
             const payload = messageData.payload;
             
-            // Hata bloğunda kullanılabilmesi için sessionId'yi de güvenle ata
             sessionIdForError = payload?.payload?.sessionId || 'unknown';
 
             if (!sourceClientId || !payload || payload.type !== 'user_transcript') return;
@@ -87,11 +89,18 @@ wss.on('connection', ws => {
             const initialTrigger = !session.scenarioId; 
 
             if (initialTrigger) { 
-                for (const scenario of Object.values(scenarios)) {
-                    if (scenario.trigger_keywords.some(keyword => text.toLowerCase().includes(keyword))) {
-                        session.scenarioId = scenario.id;
-                        console.log(`[Worker] Senaryo bulundu: ${session.scenarioId}`);
-                        break;
+                // Önce bilgi talebi senaryosunu kontrol et
+                if (informationRequestScenario.trigger_keywords.some(keyword => text.toLowerCase().includes(keyword))) {
+                    session.scenarioId = informationRequestScenario.id;
+                    console.log(`[Worker] Senaryo bulundu: ${session.scenarioId} (Bilgi Talebi)`);
+                } else {
+                    // Sonra diğer senaryoları kontrol et
+                    for (const scenario of Object.values(scenarios)) {
+                        if (scenario.id !== 'information_request' && scenario.trigger_keywords.some(keyword => text.toLowerCase().includes(keyword))) {
+                            session.scenarioId = scenario.id;
+                            console.log(`[Worker] Senaryo bulundu: ${session.scenarioId}`);
+                            break;
+                        }
                     }
                 }
             }
@@ -99,58 +108,67 @@ wss.on('connection', ws => {
             const currentScenario = scenarios[session.scenarioId];
 
             if (currentScenario) {
-                if (session.lastQuestionParam || initialTrigger) { 
-                    let paramToExtractFor = null;
-                    if(session.lastQuestionParam) {
-                        paramToExtractFor = session.lastQuestionParam.name;
-                    } else if (initialTrigger && currentScenario.required_params.length > 0) {
-                        paramToExtractFor = currentScenario.required_params[0].name;
-                    }
+                if (currentScenario.id === 'information_request') {
+                    // Bilgi Talebi Senaryosu için özel işlem
+                    spokenResponse = await aiHandler.answerQuestionWithContext(text, knowledgeBase);
+                    displayData = { type: 'info_request', text: `💬 ${spokenResponse}` };
+                    // Bilgi talebi senaryosunda oturumu sıfırla, çünkü tek seferlik bir yanıt beklenir
+                    delete userSessions[sessionId]; 
 
-                    if (paramToExtractFor) { 
-                        const extractedValue = await aiHandler.extractParameters(text, paramToExtractFor, session.lastQuestionParam ? session.lastQuestionParam.question : `Kullanıcının "${text}" cevabından bir ${paramToExtractFor} değeri çıkar.`);
-                        
-                        // ÖNEMLİ: extractedValue'yi doğrudan kontrol etmeden önce validate fonksiyonuna gönder
-                        if (validateExtractedValue(paramToExtractFor, extractedValue)) {
-                            session.params[paramToExtractFor] = extractedValue;
-                            session.misunderstandingCount = 0; 
-                            console.log(`[Worker] Bilgi çıkarıldı: {${paramToExtractFor}: "${extractedValue}"}`);
-                        } else {
-                            if (!initialTrigger) { 
-                                session.misunderstandingCount++;
-                                console.warn(`[Worker] ⚠️ Parametre çıkarılamadı veya geçersiz: '${text}'. Anlayamama sayısı: ${session.misunderstandingCount}`);
+                } else {
+                    // Diğer Senaryolar (örn. Otel Rezervasyonu) için mevcut mantık
+                    if (session.lastQuestionParam || initialTrigger) { 
+                        let paramToExtractFor = null;
+                        if(session.lastQuestionParam) {
+                            paramToExtractFor = session.lastQuestionParam.name;
+                        } else if (initialTrigger && currentScenario.required_params.length > 0) {
+                            paramToExtractFor = currentScenario.required_params[0].name;
+                        }
+
+                        if (paramToExtractFor) { 
+                            const extractedValue = await aiHandler.extractParameters(text, paramToExtractFor, session.lastQuestionParam ? session.lastQuestionParam.question : `Kullanıcının "${text}" cevabından bir ${paramToExtractFor} değeri çıkar.`);
+                            
+                            if (extractedValue && validateExtractedValue(paramToExtractFor, extractedValue)) {
+                                session.params[paramToExtractFor] = extractedValue;
+                                session.misunderstandingCount = 0; 
+                                console.log(`[Worker] Bilgi çıkarıldı: {${paramToExtractFor}: "${extractedValue}"}`);
                             } else {
-                                console.log(`[Worker] ℹ️ İlk tetikleyici mesajdan beklenen parametre çıkarılamadı, normal akış devam edecek.`);
+                                if (!initialTrigger) { 
+                                    session.misunderstandingCount++;
+                                    console.warn(`[Worker] ⚠️ Parametre çıkarılamadı veya geçersiz: '${text}'. Anlayamama sayısı: ${session.misunderstandingCount}`);
+                                } else {
+                                    console.log(`[Worker] ℹ️ İlk tetikleyici mesajdan beklenen parametre çıkarılamadı, normal akış devam edecek.`);
+                                }
                             }
                         }
                     }
-                }
 
-                if (session.misunderstandingCount >= 2) { 
-                    spokenResponse = "Üzgünüm, sizi tam olarak anlayamadım. Lütfen bilgiyi daha net bir şekilde tekrar edebilir misiniz?";
-                    displayData = { type: 'info_request', text: `💬 ${spokenResponse}` };
-                    session.misunderstandingCount = 0; 
-                } else {
-                    const nextParamToAsk = currentScenario.required_params.find(p => !session.params[p.name]);
-                    
-                    if (nextParamToAsk) {
-                        spokenResponse = nextParamToAsk.question;
-                        session.lastQuestionParam = nextParamToAsk;
+                    if (session.misunderstandingCount >= 2) { 
+                        spokenResponse = "Üzgünüm, sizi tam olarak anlayamadım. Lütfen bilgiyi daha net bir şekilde tekrar edebilir misiniz?";
                         displayData = { type: 'info_request', text: `💬 ${spokenResponse}` };
+                        session.misunderstandingCount = 0; 
                     } else {
-                        const reservationData = { type: currentScenario.id, params: session.params, status: 'confirmed' };
-                        const imageUrl = await aiHandler.getImageUrl(reservationData.params.location);
-                        reservationData.imageUrl = imageUrl;
+                        const nextParamToAsk = currentScenario.required_params.find(p => !session.params[p.name]);
                         
-                        const newReservation = await dbHandler.saveReservation(reservationData);
-                        
-                        spokenResponse = currentScenario.confirmation_message(session.params);
-                        displayData = { type: 'confirmation_card', data: newReservation };
-                        delete userSessions[sessionId]; 
+                        if (nextParamToAsk) {
+                            spokenResponse = nextParamToAsk.question;
+                            session.lastQuestionParam = nextParamToAsk;
+                            displayData = { type: 'info_request', text: `💬 ${spokenResponse}` };
+                        } else {
+                            const reservationData = { type: currentScenario.id, params: session.params, status: 'confirmed' };
+                            const imageUrl = await aiHandler.getImageUrl(reservationData.params.location);
+                            reservationData.imageUrl = imageUrl;
+                            
+                            const newReservation = await dbHandler.saveReservation(reservationData);
+                            
+                            spokenResponse = currentScenario.confirmation_message(session.params);
+                            displayData = { type: 'confirmation_card', data: newReservation };
+                            delete userSessions[sessionId]; 
+                        }
                     }
                 }
             } else {
-                spokenResponse = "Size nasıl yardımcı olabilirim? Örneğin, 'otel rezervasyonu yapmak istiyorum' diyebilirsiniz.";
+                spokenResponse = "Size nasıl yardımcı olabilirim? Örneğin, 'otel rezervasyonu yapmak istiyorum' veya 'çalışma saatleriniz nedir?' diyebilirsiniz."; // Yeni örnekler eklendi
                 displayData = { type: 'info_request', text: spokenResponse };
                 session.lastQuestionParam = null; 
             }
@@ -170,13 +188,12 @@ wss.on('connection', ws => {
             console.error(`[Worker] ❌ [Client: ${sourceClientId}] İşleme sırasında kritik hata:`, error);
             const errorResponse = "Üzgünüm, bir sorun oluştu ve isteğinizi işleyemedim. Lütfen daha sonra tekrar deneyin veya bana başka bir şey söyleyin.";
             
-            // Hata mesajını gönderirken sessionIdForError'ı kullanıyoruz
             let audioContent;
             try {
                 audioContent = await ttsHandler.getXttsAudio(errorResponse);
             } catch (ttsError) {
                 console.error("[Worker] ❌ TTS hatası sırasında hata oluştu, sesli yanıt verilemiyor:", ttsError);
-                audioContent = null; // Ses üretilemezse null olsun
+                audioContent = null; 
             }
 
             ws.send(JSON.stringify({
@@ -184,7 +201,7 @@ wss.on('connection', ws => {
                 payload: {
                     type: 'ai_response',
                     payload: { 
-                        sessionId: sessionIdForError, // Burayı düzelttik
+                        sessionId: sessionIdForError, 
                         spokenText: errorResponse, 
                         audio: audioContent, 
                         audio_format: 'wav', 
@@ -192,7 +209,7 @@ wss.on('connection', ws => {
                     }
                 }
             }));
-            if (userSessions[sessionIdForError]) { // Burayı da düzelttik
+            if (userSessions[sessionIdForError]) { 
                 delete userSessions[sessionIdForError];
             }
         }

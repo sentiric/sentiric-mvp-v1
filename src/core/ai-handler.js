@@ -16,27 +16,40 @@ async function generateText(prompt) {
     return llmAdapter.generateText(prompt);
 }
 
-async function extractParameters(text, paramName, question) {
+// YENİ FONKSİYON: Bilgi bankası (context) kullanarak soru yanıtlama
+async function answerQuestionWithContext(userQuestion, knowledgeBase) {
+    const prompt = `Aşağıdaki bilgilerden yola çıkarak, kullanıcının "${userQuestion}" sorusuna mümkün olan en kısa ve net cevabı ver. Eğer bilgi bulunmuyorsa, 'Üzgünüm, bu konuda bilgiye sahip değilim.' şeklinde yanıt ver.\n\nBilgiler:\n${JSON.stringify(knowledgeBase.faqs.map(f => ({ question: f.question, answer: f.answer })))}`;
+
+    try {
+        const responseText = await generateText(prompt);
+        console.log("[AI Handler] RAG Ham Yanıtı:", responseText);
+        return responseText.trim();
+    } catch (error) {
+        console.error("[AI Handler] ❌ Bilgi bankasından yanıt üretimi sırasında hata:", error.message);
+        return "Üzgünüm, şu anda bilgiye erişemiyorum.";
+    }
+}
+
+
+async function extractParameters(text, paramName, question) { 
     let specificPrompt = '';
 
-    // LLM'e sadece metinde geçen değeri çıkarmasını, yoksa null dönmesini açıkça belirtiyoruz.
     const baseInstruction = "Sadece ve sadece JSON formatında yanıt ver. Bu objenin içinde tek bir anahtar 'value' olsun. Başka hiçbir metin, açıklama veya formatlama olmamalı. Eğer ilgili bilgi metinde açıkça belirtilmemişse, 'value' anahtarına null değerini ata.";
 
     if (paramName === 'people_count') {
         specificPrompt = `Kullanıcının şu cevabından: "${text}", kaç kişi olduğunu bir sayı olarak çıkar. ${baseInstruction} Örnek: {"value": "2"} veya {"value": null}`;
     } else if (paramName === 'budget') {
         specificPrompt = `Kullanıcının şu cevabından: "${text}", bütçesini (sadece sayısal değeri) çıkar. ${baseInstruction} Örnek: {"value": "1000"} veya {"value": null}`;
-    } else if (paramName === 'location') { // Konum için özel talimat
+    } else if (paramName === 'location') { 
         specificPrompt = `Kullanıcının şu cevabından: "${text}", otel rezervasyonu için hangi şehirde olduğunu çıkar. Yanıtını sadece bir JSON objesi olarak ver ve bu objenin içinde tek bir anahtar 'value' olsun. Başka hiçbir metin, açıklama veya formatlama olmamalı. Eğer şehir metinde açıkça belirtilmemişse, 'value' anahtarına null değerini ata. Örnek: {"value": "Antalya"} veya {"value": null}`;
     } else {
-        // Genel parametreler için
         specificPrompt = `Kullanıcının şu cevabından: "${text}", sorulan şu soruya karşılık gelen değeri çıkar: "${question}". ${baseInstruction} Örnek: {"value": "15 Temmuz"} veya {"value": null}`;
     }
     
     let responseText = '';
     try {
-        responseText = await generateText(specificPrompt); // LLM'in ham yanıtı
-        console.log("[AI Handler] LLM Ham Yanıtı:", responseText); // Hata ayıklama için
+        responseText = await generateText(specificPrompt); 
+        console.log("[AI Handler] LLM Ham Yanıtı:", responseText); 
         
         const jsonStringMatch = responseText.match(/\{.*?\}/s); 
         
@@ -46,12 +59,11 @@ async function extractParameters(text, paramName, question) {
         }
 
         const jsonString = jsonStringMatch[0];
-        console.log("[AI Handler] Çıkarılan JSON Dizisi:", jsonString); // Hata ayıklama için
+        console.log("[AI Handler] Çıkarılan JSON Dizisi:", jsonString); 
 
         const extracted = JSON.parse(jsonString);
         
         if (extracted && extracted.value !== undefined) {
-            // Eğer LLM 'null' döndürdüyse, bunu null olarak kabul et.
             if (extracted.value === null || String(extracted.value).trim().toLowerCase() === 'null') {
                 return null;
             }
@@ -71,7 +83,7 @@ async function extractParameters(text, paramName, question) {
 
     } catch (error) {
         console.error("[AI Handler] ❌ Bilgi çıkarımı sırasında hata (JSON ayrıştırma veya LLM yanıtı formatı):", error.message);
-        console.error("[AI Handler] Hata alınan metin:", responseText); // Hata anında ham yanıtı tekrar göster
+        console.error("[AI Handler] Hata alınan metin:", responseText); 
         return null;
     }
 }
@@ -97,5 +109,6 @@ async function getImageUrl(query) {
 module.exports = { 
     generateText, 
     extractParameters, 
-    getImageUrl 
+    getImageUrl,
+    answerQuestionWithContext // Yeni fonksiyonu dışa aktar
 };
